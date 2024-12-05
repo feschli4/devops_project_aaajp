@@ -15,6 +15,44 @@ class Marble(BaseModel):
     pos: str       # position on board (0 to 95)
     is_save: bool  # true if marble was moved out of kennel and was not yet moved
 
+class Board(BaseModel):
+
+    def __init__(self) -> None:
+        pass
+
+    def CheckOccupation(self) -> None:
+        pass
+
+    class Field():
+        def __init__(self) -> None:
+            self._occupied = False
+            self._occupying_player = None
+            self._occupying_marble = None
+
+        @property.setter
+        def set_occupied(self, player_id: int, marble_id: int):
+            if self._occupied == True:
+                self._occupied == False
+                self._occupying_player = None
+                self._occupying_marble = None
+            else:
+                self._occupied == True
+                self._occupying_player = player_id
+                self._occupying_marble = marble_id
+                # expecting the class Marble to have a funtion send home. This will be added here
+                  
+    class StartField(Field):
+        def __init__(self, player_id: int) -> None:
+                self._owner = player_id
+
+    class Kennel(Field):
+        def __init__(self) -> None:
+                self._marble_count = 4
+            
+
+    class House(Field):
+        pass
+
 
 class PlayerState(BaseModel):
     name: str                  # name of player
