@@ -20,26 +20,23 @@ class Board(BaseModel):
     def __init__(self) -> None:
         pass
 
-    def CheckOccupation(self) -> None:
-        pass
-
     class Field():
         def __init__(self) -> None:
             self._occupied = False
             self._occupying_player = None
             self._occupying_marble = None
+            return
 
         @property.setter
-        def set_occupied(self, player_id: int, marble_id: int):
-            if self._occupied == True:
-                self._occupied == False
-                self._occupying_player = None
-                self._occupying_marble = None
+        def set_occupied(self, player_id: int, marble_id: int) -> None:
+            if self._occupied is True:
+                print(f"Das Feld ist bereits durch {self._occupying_player} besetzt")
+                # expecting the class Marble to have a funtion send home. This will be added here
             else:
                 self._occupied == True
-                self._occupying_player = player_id
-                self._occupying_marble = marble_id
-                # expecting the class Marble to have a funtion send home. This will be added here
+
+            self._occupying_player = player_id
+            self._occupying_marble = marble_id
                   
     class StartField(Field):
         def __init__(self, player_id: int) -> None:
@@ -51,6 +48,7 @@ class Board(BaseModel):
             
 
     class House(Field):
+        #
         pass
 
 
