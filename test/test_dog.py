@@ -170,3 +170,53 @@ def test_get_move_values():
     assert Dog._get_move_values("K") == [13]
     assert Dog._get_move_values("A") == [1, 11]
     assert Dog._get_move_values("unknown") == []
+
+
+def test_get_start_field():
+    assert Dog._get_start_field(0) == 0
+    assert Dog._get_start_field(1) == 16
+    assert Dog._get_start_field(2) == 32
+    assert Dog._get_start_field(3) == 48
+
+
+def test_get_safe_zone():
+    assert Dog._get_safe_zone(0) == [68, 69, 70, 71]
+    assert Dog._get_safe_zone(1) == [76, 77, 78, 79]
+    assert Dog._get_safe_zone(2) == [84, 85, 86, 87]
+    assert Dog._get_safe_zone(3) == [92, 93, 94, 95]
+
+
+def test_get_kennel_zone():
+    assert Dog._get_kennel_zone(0) == [64, 65, 66, 67]
+    assert Dog._get_kennel_zone(1) == [72, 73, 74, 75]
+    assert Dog._get_kennel_zone(2) == [80, 81, 82, 83]
+    assert Dog._get_kennel_zone(3) == [88, 89, 90, 91]
+
+
+def test_calculate_new_position():
+    assert Dog._calculate_new_position(0, 4, 0) == [4, 71]
+    assert Dog._calculate_new_position(0, 5, 0) == [5]
+    assert Dog._calculate_new_position(0, -4, 0) == [60]
+    assert Dog._calculate_new_position(62, 4, 0) == [2, 69]
+    assert Dog._calculate_new_position(62, 4, 1) == [2]
+    assert Dog._calculate_new_position(68, 1, 0) == [69]
+    assert Dog._calculate_new_position(18, -4, 1) == [14]
+
+
+def test_is_swappable():
+    assert Dog._is_swappable(Marble(pos=10, is_save=False), 0) == True
+    assert Dog._is_swappable(Marble(pos=64, is_save=False), 0) == False
+    assert Dog._is_swappable(Marble(pos=68, is_save=False), 0) == False
+    assert Dog._is_swappable(Marble(pos=10, is_save=True), 0) == False
+
+
+def test_get_list_action():
+    game = Dog()
+    game.state.idx_player_active = 0
+    game.state.list_player[0].list_card = [Card(suit='♠', rank='2'), Card(suit='♠', rank='4')]
+    game.state.list_player[0].list_marble = [Marble(pos=0, is_save=False), Marble(pos=64, is_save=False)]
+    actions = game.get_list_action()
+    assert len(actions) == 5
+    assert Action(card=Card(suit='♠', rank='2'), pos_from=0, pos_to=2, card_swap=None) in actions
+    assert Action(card=Card(suit='♠', rank='4'), pos_from=0, pos_to=4, card_swap=None) in actions
+    assert Action(card=Card(suit='♠', rank='4'), pos_from=0, pos_to=60, card_swap=None) in actions

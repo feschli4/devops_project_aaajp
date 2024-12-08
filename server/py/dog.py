@@ -239,7 +239,7 @@ class Dog(Game):
 
         # Check if the marble moves over the start field -> if yes, calculate the new position in the safe zone
         if new_pos < current_pos or current_pos <= start_field < new_pos:
-            new_pos_safe_zone = safe_zone[0] + (new_pos - start_field)
+            new_pos_safe_zone = safe_zone[0] + (new_pos - start_field - 1)
             if new_pos_safe_zone in safe_zone:
                 return [new_pos, new_pos_safe_zone]
 
@@ -259,8 +259,7 @@ class Dog(Game):
         cards = player.list_card
 
         # get single suit of cards
-        single_suit = [card for card in GameState.LIST_CARD if card.suit == "♠"]
-        single_suit = [Card(suit="", rank=card.rank) for card in single_suit]
+        single_suit = [Card(suit="", rank=rank) for rank in "2,3,4,5,6,7,8,9,10,J,Q,K,A".split(",")]
 
         # get blocked kennel exits, where marbles can't pass
         blocked_exits = []
@@ -292,7 +291,11 @@ class Dog(Game):
                                     break
 
                         if not is_blocked:
-                            move_actions.append(Action(card=card, pos_from=marble.pos, pos_to=new_pos))
+                            action = Action(card=Card(suit=card.suit, rank=card.rank),
+                                            pos_from=marble.pos,
+                                            pos_to=new_pos,
+                                            card_swap=None)
+                            move_actions.append(action)
 
         # list all possible swap-actions
         swap_actions = []
@@ -305,7 +308,8 @@ class Dog(Game):
                             if Dog._is_swappable(other_marble, other_player_index):
                                 swap_actions.append(Action(card=Card(suit='', rank='J'),
                                                            pos_from=marble.pos,
-                                                           pos_to=other_marble.pos))
+                                                           pos_to=other_marble.pos,
+                                                           card_swap=None))
 
         # list all possible get-out-of-kennel-actions
         get_out_of_kennel_actions = []
@@ -313,17 +317,22 @@ class Dog(Game):
             if marble.pos in Dog._get_kennel_zone(player_index):
                 get_out_of_kennel_actions.append(Action(card=Card(suit='', rank='A'),
                                                         pos_from=marble.pos,
-                                                        pos_to=Dog._get_start_field(player_index)))
+                                                        pos_to=Dog._get_start_field(player_index),
+                                                        card_swap=None))
                 get_out_of_kennel_actions.append(Action(card=Card(suit='', rank='K'),
                                                         pos_from=marble.pos,
-                                                        pos_to=Dog._get_start_field(player_index)))
+                                                        pos_to=Dog._get_start_field(player_index),
+                                                        card_swap=None))
 
         # all possible actions
         all_actions = move_actions + swap_actions + get_out_of_kennel_actions
 
         # filter actions by cards that player actually has
         player_actions = [
-            Action(card=card, pos_from=action.pos_from, pos_to=action.pos_to)
+            Action(card=card,
+                   pos_from=action.pos_from,
+                   pos_to=action.pos_to,
+                   card_swap=None)
             for action in all_actions
             for card in cards
             if action.card.rank == card.rank
@@ -429,6 +438,14 @@ if __name__ == '__main__':
     # print("\nGame State after resetting:")
     # print(game.get_state())
 
-    cards = [Card(suit='♠', rank='2'), Card(suit='♥', rank='2'), Card(suit='♦', rank='2'), Card(suit='♣', rank='2'),
-        Card(suit='♠', rank='3'), Card(suit='♥', rank='3'), Card(suit='♦', rank='3'), Card(suit='♣', rank='3')]
-
+    game = Dog()
+    game.state.idx_player_active = 0
+    game.state.list_player[0].list_card = [Card(suit='♠', rank='2'), Card(suit='♠', rank='4')]
+    game.state.list_player[0].list_marble = [Marble(pos=0, is_save=False), Marble(pos=64, is_save=False)]
+    print("here 1")
+    actions = game.get_list_action()
+    print("here 2")
+    assert len(actions) == 3
+    assert Action(card=Card(suit='♠', rank='2'), pos_from=0, pos_to=2) in actions
+    assert Action(card=Card(suit='♠', rank='4'), pos_from=0, pos_to=4) in actions
+    assert Action(card=Card(suit='♠', rank='4'), pos_from=0, pos_to=60) in actions
