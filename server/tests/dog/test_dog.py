@@ -2,7 +2,6 @@ import pytest
 from server.py.dog import Dog, Card, Marble, PlayerState, Action, GameState, GamePhase
 
 
-
 def test_swap_cards():
     game_state = GameState(
         list_player=[
@@ -59,6 +58,7 @@ def test_swap_cards():
 def game():
     return Dog()
 
+
 def test_initialize_game():
     """Test initializing the Dog game."""
     game = Dog()
@@ -67,6 +67,7 @@ def test_initialize_game():
     assert len(state.list_player) == 4
     assert state.phase == GamePhase.RUNNING
     assert state.cnt_round == 1
+
 
 def test_initial_game_state_values(game):
     """Test 001: Validate values of initial game state (cnt_round=1) [5 points]"""
@@ -87,11 +88,13 @@ def test_initial_game_state_values(game):
         assert len(player.list_card) == 6, f'{state}Error: len("list_player.list_card") must be 6 initially'
         assert len(player.list_marble) == 4, f'{state}Error: len("list_player.list_marble") must be 4 initially'
 
+
 def test_starting_player_is_active(game):
     """Test 002: Verify that the correct player starts the game [5 points]"""
     state = game.get_state()
     assert 0 <= state.idx_player_started < 4, f'{state}Error: "idx_player_started" must be in range (0-3)'
     assert state.idx_player_active == state.idx_player_started, f'{state}Error: "idx_player_active" must be equal to "idx_player_started" initially'
+
 
 def test_set_custom_game_state():
     """Test 003: Set and validate a custom game state [5 points]"""
@@ -120,6 +123,7 @@ def test_set_custom_game_state():
     assert state.cnt_round == 2, f'{state}Error: "cnt_round" must be 2'
     assert state.idx_player_active == 2, f'{state}Error: "idx_player_active" must be 2'
 
+
 def test_initial_marble_positions(game):
     """Test 004: Validate initial positions of all marbles [5 points]"""
     state = game.get_state()
@@ -128,10 +132,12 @@ def test_initial_marble_positions(game):
             assert marble.pos is None, f'{state}Error: "marble.pos" must be None initially'
             assert not marble.is_save, f'{state}Error: "marble.is_save" must be False initially'
 
+
 def test_initial_card_draw_pile(game):
     """Test 005: Validate the number of cards in the draw pile after initial deal [5 points]"""
     state = game.get_state()
     assert len(state.list_card_draw) == 86, f'{state}Error: "list_card_draw" must contain 86 cards initially'
+
 
 def test_number_of_cards_in_round_2():
     """Test 047: Validate number of cards dealt in Round 2 [5 points]"""
@@ -147,3 +153,20 @@ def test_number_of_cards_in_round_2():
     for player in state.list_player:
         # reapeate for 3 -> 4, 4 -> 3, 5 -> 2, 6-> 6
         assert len(player.list_card) == 5, f'Error: Expected 5 cards in round 2, found {len(player.list_card)}'
+
+
+def test_get_move_values():
+    assert Dog._get_move_values("2") == [2]
+    assert Dog._get_move_values("3") == [3]
+    assert Dog._get_move_values("4") == [4, -4]
+    assert Dog._get_move_values("5") == [5]
+    assert Dog._get_move_values("6") == [6]
+    assert Dog._get_move_values("7") == list(range(1, 8))
+    assert Dog._get_move_values("8") == [8]
+    assert Dog._get_move_values("9") == [9]
+    assert Dog._get_move_values("10") == [10]
+    assert Dog._get_move_values("J") == []
+    assert Dog._get_move_values("Q") == [12]
+    assert Dog._get_move_values("K") == [13]
+    assert Dog._get_move_values("A") == [1, 11]
+    assert Dog._get_move_values("unknown") == []

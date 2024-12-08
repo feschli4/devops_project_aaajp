@@ -4,6 +4,7 @@ from typing import List, Optional, ClassVar
 from pydantic import BaseModel
 from enum import Enum
 import random
+import copy
 
 
 class Card(BaseModel):
@@ -73,7 +74,9 @@ class GameState(BaseModel):
         Card(suit='', rank='JKR'), Card(suit='', rank='JKR'), Card(suit='', rank='JKR')
     ] * 2
 
-    cnt_player: int = 4                # number of players (must be 4)
+    # Player 0=Blue. Player 1=Green. Player 2=Red, Player 3=yellow according to
+    # https://wiki.revolytics.com/fbd9281e44ae40f4acfc326782876184/
+    cnt_player: int = 4                # number of players (must be 4).
     phase: GamePhase                   # current phase of the game
     cnt_round: int                     # current round
     bool_card_exchanged: bool          # true if cards was exchanged in round
@@ -164,10 +167,181 @@ class Dog(Game):
             # self.exchange_cards() # TODO:: Exchange cards between players
             self.setup_next_round()  # Setup the next round with updated card counts
 
+    @staticmethod
+    def _get_move_values(rank: str) -> [int]:
+        """ Get the number of steps to move for the given card rank """
+        match rank:
+            case "2" | "3" | "5" | "6" | "8" | "9" | "10":
+                return [int(rank)]
+            case "4":
+                return [4, -4]
+            case "7":
+                return list(range(1, 8))
+            case "J":
+                return []
+            case "Q":
+                return [12]
+            case "K":
+                return [13]
+            case "A":
+                return [1, 11]
+
+        return []
+
+    @staticmethod
+    def _get_start_field(player_idx: int) -> int:
+        """ Get the start field for the given player index """
+        return player_idx * 16
+
+    @staticmethod
+    def _get_safe_zone(player_idx: int) -> [int]:
+        """ Get the safe zone for the given player index """
+        start_field = Dog._get_start_field(player_idx)
+        start_safe_zone = start_field + 68 - (player_idx * 8)
+        return list(range(start_safe_zone, start_safe_zone + 4))
+
+    @staticmethod
+    def _get_kennel_zone(player_idx: int) -> [int]:
+        """ Get the kennel zone for the given player index """
+        return [field - 4 for field in Dog._get_safe_zone(player_idx)]
+
+    @staticmethod
+    def _calculate_new_position(current_pos: int, move_value: int, player_idx: int) -> [int]:
+        """ Calculate the new position after moving the marble.
+        -> If no move is possible, return [].
+        -> if marble could move to safe zone, then return two numbers. The first number is position, if marble moves
+        over start (i.e. starts a new round), the second number is the position in the safe zone.
+
+        It does not check if the new position is already occupied by another marble or if the move is valid.
+        """
+        safe_zone = Dog._get_safe_zone(player_idx)
+        kennel_zone = Dog._get_kennel_zone(player_idx)
+        start_field = Dog._get_start_field(player_idx)
+
+        # Check if the marble is in the kennel --> we can't move
+        if current_pos in kennel_zone:
+            return []
+
+        # Check if the marble is in the safe zone --> only move if the new position is also in the safe zone
+        if current_pos in safe_zone:
+            new_pos = current_pos + move_value
+            if new_pos in safe_zone:
+                return [new_pos]
+            return []
+
+        # "ordinary" move
+        ordinary_positions_count = 64  # number of fields without kennels and finish zones
+        new_pos = (current_pos + move_value) % ordinary_positions_count
+
+        # if the move value is negative (i.e. for card 4), we return new_pos right away
+        if move_value < 0:
+            return [new_pos]
+
+        # Check if the marble moves over the start field -> if yes, calculate the new position in the safe zone
+        if new_pos < current_pos or current_pos <= start_field < new_pos:
+            new_pos_safe_zone = safe_zone[0] + (new_pos - start_field)
+            if new_pos_safe_zone in safe_zone:
+                return [new_pos, new_pos_safe_zone]
+
+        return [new_pos]
 
     def get_list_action(self) -> List[Action]:
-        """ Get a list of possible actions for the active player """
-        pass
+        """ Get a list of possible actions for the active player
+
+        TODO: I think the handling for number 7 is not finished. But tests will show.
+        TODO: add test methods for this method and all newly created static methods.
+        """
+
+        # collect basic information
+        player = self.state.list_player[self.state.idx_player_active]
+        player_index = self.state.list_player.index(player)
+        marbles = player.list_marble
+        cards = player.list_card
+
+        # get single suit of cards
+        single_suit = [card for card in GameState.LIST_CARD if card.suit == "♠"]
+        single_suit = [Card(suit="", rank=card.rank) for card in single_suit]
+
+        # get blocked kennel exits, where marbles can't pass
+        blocked_exits = []
+        for player in self.state.list_player:
+            for marble in player.list_marble:
+                if marble.is_save:
+                    blocked_exits.append(marble.pos)
+
+        # list all possible move-actions
+        move_actions = []
+        for card in single_suit:
+            move_values = Dog._get_move_values(card.rank)
+            for move_value in move_values:
+                for marble in marbles:
+                    new_positions = Dog._calculate_new_position(marble.pos, move_value, player_index)
+                    for new_pos in new_positions:
+                        # check if the new position is blocked by a marble fresh out of the kennel
+                        is_blocked = False
+                        for blocked_exit in blocked_exits:
+                            if marble.pos < blocked_exit < new_pos or new_pos < blocked_exit < marble.pos:
+                                is_blocked = True
+                                break
+
+                        # check if the new position would overtake inside safe zone
+                        if new_pos in Dog._get_safe_zone(player_index):
+                            for other_marble in marbles:
+                                if other_marble.pos in Dog._get_safe_zone(player_index) and new_pos >= other_marble.pos:
+                                    is_blocked = True
+                                    break
+
+                        if not is_blocked:
+                            move_actions.append(Action(card=card, pos_from=marble.pos, pos_to=new_pos))
+
+        # list all possible swap-actions
+        swap_actions = []
+        for marble in marbles:
+            if Dog._is_swappable(marble, player_index):
+                for other_player in self.state.list_player:
+                    if other_player != player:
+                        other_player_index = self.state.list_player.index(other_player)
+                        for other_marble in other_player.list_marble:
+                            if Dog._is_swappable(other_marble, other_player_index):
+                                swap_actions.append(Action(card=Card(suit='', rank='J'),
+                                                           pos_from=marble.pos,
+                                                           pos_to=other_marble.pos))
+
+        # list all possible get-out-of-kennel-actions
+        get_out_of_kennel_actions = []
+        for marble in marbles:
+            if marble.pos in Dog._get_kennel_zone(player_index):
+                get_out_of_kennel_actions.append(Action(card=Card(suit='', rank='A'),
+                                                        pos_from=marble.pos,
+                                                        pos_to=Dog._get_start_field(player_index)))
+                get_out_of_kennel_actions.append(Action(card=Card(suit='', rank='K'),
+                                                        pos_from=marble.pos,
+                                                        pos_to=Dog._get_start_field(player_index)))
+
+        # all possible actions
+        all_actions = move_actions + swap_actions + get_out_of_kennel_actions
+
+        # filter actions by cards that player actually has
+        player_actions = [
+            Action(card=card, pos_from=action.pos_from, pos_to=action.pos_to)
+            for action in all_actions
+            for card in cards
+            if action.card.rank == card.rank
+        ]
+
+        # add Joker actions
+        if any(card.rank == 'JKR' for card in cards):
+            player_actions.extend(copy.deepcopy(all_actions))
+
+        return player_actions
+
+    @staticmethod
+    def _is_swappable(marble: Marble, player_index: int) -> bool:
+        """ Check if the marble is swappable with another player's marble,
+         i.e. not in kennel, start field or already saved """
+        return (marble.pos not in Dog._get_kennel_zone(player_index) and
+                marble.pos not in Dog._get_safe_zone(player_index) and
+                not marble.is_save)
 
     def apply_action(self, action: Action) -> None:
         """ Apply the given action to the game """
@@ -208,6 +382,7 @@ class Dog(Game):
         player2.list_card.remove(card2)
         player1.list_card.append(card2)
 
+
 class RandomPlayer(Player):
 
     def select_action(self, state: GameState, actions: List[Action]) -> Optional[Action]:
@@ -219,37 +394,41 @@ class RandomPlayer(Player):
 
 if __name__ == '__main__':
 
-    game = Dog()
+    # game = Dog()
+    #
+    # # Get the initial state of the game and print it
+    # initial_state = game.get_state()
+    # print("Initial Game State:")
+    # print(initial_state)
+    #
+    # # Simulate setting up the next rounds to see how the card distribution changes
+    # for round_num in range(1, 4):
+    #     game.setup_next_round()
+    #     print(f"\nGame State after setting up round {round_num + 1}:")
+    #     print(game.get_state())
+    #
+    # # Simulate a few turns to see how the game progresses
+    # print("\nStarting turns simulation:")
+    # for turn in range(6):
+    #     # Example of getting available actions (currently, not implemented)
+    #     actions = game.get_list_action()
+    #     if actions:
+    #         # Apply a random action (using RandomPlayer logic as an example)
+    #         action = random.choice(actions)
+    #         game.apply_action(action)
+    #     else:
+    #         # If no valid actions, skip the turn
+    #         game.next_turn()
+    #
+    #     # Print the game state after each turn
+    #     print(f"\nGame State after turn {turn + 1}:")
+    #     print(game.get_state())
+    #
+    # # Reset the game and print the reset state
+    # game.reset()
+    # print("\nGame State after resetting:")
+    # print(game.get_state())
 
-    # Get the initial state of the game and print it
-    initial_state = game.get_state()
-    print("Initial Game State:")
-    print(initial_state)
+    cards = [Card(suit='♠', rank='2'), Card(suit='♥', rank='2'), Card(suit='♦', rank='2'), Card(suit='♣', rank='2'),
+        Card(suit='♠', rank='3'), Card(suit='♥', rank='3'), Card(suit='♦', rank='3'), Card(suit='♣', rank='3')]
 
-    # Simulate setting up the next rounds to see how the card distribution changes
-    for round_num in range(1, 4):
-        game.setup_next_round()
-        print(f"\nGame State after setting up round {round_num + 1}:")
-        print(game.get_state())
-
-    # Simulate a few turns to see how the game progresses
-    print("\nStarting turns simulation:")
-    for turn in range(6):
-        # Example of getting available actions (currently, not implemented)
-        actions = game.get_list_action()
-        if actions:
-            # Apply a random action (using RandomPlayer logic as an example)
-            action = random.choice(actions)
-            game.apply_action(action)
-        else:
-            # If no valid actions, skip the turn
-            game.next_turn()
-
-        # Print the game state after each turn
-        print(f"\nGame State after turn {turn + 1}:")
-        print(game.get_state())
-
-    # Reset the game and print the reset state
-    game.reset()
-    print("\nGame State after resetting:")
-    print(game.get_state())
