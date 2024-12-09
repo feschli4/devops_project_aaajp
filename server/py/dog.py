@@ -177,15 +177,23 @@ class Dog(Game):
         """ Setup the next round with decreasing number of cards """
         cards_in_round = [6, 5, 4, 3, 2]  # Anzahl der Karten für jede Runde (beginnend mit Runde 1)
         current_cards_count = cards_in_round[(self.state.cnt_round - 1) % len(cards_in_round)]
-        # Deal cards to each player
+
+        # Shuffle discard pile into draw pile if needed
+        if not self.state.list_card_draw and self.state.list_card_discard: # Nachziehstapel leer
+            print("Shuffling discard pile into draw pile.")
+            self.state.list_card_draw = self.state.list_card_discard.copy() # Kopiere Ablagestapel
+            self.state.list_card_discard.clear() # Leere Ablagestapel
+            random.shuffle(self.state.list_card_draw) # Mische den Stapel
+
+        # Deal cards to players
         for player in self.state.list_player:
             while len(player.list_card) < current_cards_count and self.state.list_card_draw:
                 player.list_card.append(self.state.list_card_draw.pop())
 
-        if not self.state.list_card_draw:
-            self.state.list_card_draw = self.state.list_card_discard.copy()
-            self.state.list_card_discard.clear()
-            random.shuffle(self.state.list_card_draw)
+        print(f"Round {self.state.cnt_round}: Draw pile: {len(self.state.list_card_draw)}, "
+              f"Discard pile: {len(self.state.list_card_discard)}, "
+              f"Player hands: {[len(player.list_card) for player in self.state.list_player]}")
+
 
     def next_turn(self) -> None:
         """ Advance the turn to the next player """
@@ -258,11 +266,29 @@ class Dog(Game):
 
     def apply_action(self, action: Action) -> None:
         """ Apply the given action to the game """
+        # Hole den aktiven Spieler unabhängig davon, ob eine Aktion vorhanden ist
+        player = self.state.list_player[self.state.idx_player_active]
+
         if action is None:
-            self.next_turn()  # Keine Aktion, überspringen
+            if not self.get_list_action():  # No valid actions
+                if player.list_card:  # Only discard if cards are present
+                    print(f"Discarding cards for Player {self.state.idx_player_active}: {player.list_card}")
+                    self.state.list_card_discard.extend(player.list_card)
+                    player.list_card.clear()
+                else:
+                    print(f"Player {self.state.idx_player_active} has no cards to discard.")
+            self.next_turn()
             return
 
-        player = self.state.list_player[self.state.idx_player_active]
+        # Reshuffle prüfen
+        if not self.state.list_card_draw:
+            print("Nachziehstapel leer - Reshuffle des Ablagestapels.")
+            if self.state.list_card_discard:
+                self.state.list_card_draw = self.state.list_card_discard.copy()
+                self.state.list_card_discard.clear()
+                random.shuffle(self.state.list_card_draw)
+            else:
+                raise ValueError("Keine Karten mehr verfügbar, weder im Nachzieh- noch im Ablagestapel.")
 
         if action.pos_from is None:  # Start aus dem Kennel
             marble = next((m for m in player.list_marble if m.pos is None), None)
@@ -270,7 +296,8 @@ class Dog(Game):
             marble = next((m for m in player.list_marble if m.pos == action.pos_from), None)
 
         if marble is None:
-            raise ValueError("Keine gültige Marble gefunden, die bewegt werden kann.")
+            self.next_turn() # Keine gültige Marble gefunden für die Aktion
+            return
 
         # Bewegung anwenden
         marble.pos = action.pos_to
@@ -367,39 +394,47 @@ class RandomPlayer(Player):
 
 if __name__ == '__main__':
 
-    # Initialisiere das Spiel
+    # Initialize the game
     game = Dog()
 
-    # 1. Initialen Spielstatus abrufen und ausgeben
+    # Step 1: Print initial game state
+    print("Initial Game State:")
     initial_state = game.get_state()
-    print("Initialer Spielstatus:")
     print(initial_state)
 
-    # 2. Nächste Runden vorbereiten und Kartenverteilung beobachten
-    print("\nSimulation: Vorbereitung der nächsten Runden")
+    # Step 2: Simulate several rounds
+    print("\nSimulating 3 Rounds of the Game...")
     for round_num in range(1, 4):
-        game.setup_next_round()
-        print(f"\nSpielstatus nach Vorbereitung der Runde {round_num + 1}:")
-        print(game.get_state())
+        print(f"\n--- Round {round_num} ---")
 
-    # 3. Simulation einiger Spielzüge
-    print("\nSimulation: Spielzüge")
-    for turn in range(6):
-        # Verfügbare Aktionen abrufen
-        available_actions = game.get_list_action()
-        if available_actions:
-            # Wähle zufällig eine Aktion aus
-            selected_action = random.choice(available_actions)
-            game.apply_action(selected_action)
-        else:
-            # Wenn keine gültigen Aktionen verfügbar sind, den Zug überspringen
-            game.next_turn()
+        for _ in range(game.state.cnt_player):  # Each player gets a turn
+            print(f"\nPlayer {game.state.idx_player_active + 1}'s Turn")
 
-        # Spielstatus nach dem Zug ausgeben
-        print(f"\nSpielstatus nach Zug {turn + 1}:")
-        print(game.get_state())
+            # Get available actions
+            available_actions = game.get_list_action()
 
-    # 4. Spiel zurücksetzen und Status ausgeben
+            if available_actions:
+                # Randomly select an action and apply it
+                selected_action = random.choice(available_actions)
+                print(f"Selected Action: {selected_action}")
+                game.apply_action(selected_action)
+            else:
+                # If no actions are available, discard cards
+                print("No valid actions available. Discarding cards.")
+                game.apply_action(None)
+
+            # Print game state after each turn
+            print("\nGame State after the Turn:")
+            print(game.get_state())
+
+        # Check if the game is finished
+        game.check_game_status()
+        if game.state.phase == GamePhase.FINISHED:
+            print(f"\nGame Over! Player {game.state.idx_player_active + 1} Wins!")
+            break
+
+    # Step 3: Reset the game and print the final state
+    print("\nResetting the Game...")
     game.reset()
-    print("\nSpielstatus nach Zurücksetzen:")
+    print("Game State after Reset:")
     print(game.get_state())
