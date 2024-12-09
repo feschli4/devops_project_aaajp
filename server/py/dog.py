@@ -1,10 +1,12 @@
 # runcmd: cd ../.. & venv\Scripts\python server/py/dog_template.py
-from server.py.game import Game, Player
-from typing import List, Optional, ClassVar
-from pydantic import BaseModel
-from enum import Enum
-import random
 import copy
+import random
+from enum import Enum
+from typing import List, Optional, ClassVar
+
+from pydantic import BaseModel
+
+from server.py.game import Game, Player
 
 
 class Card(BaseModel):
@@ -28,6 +30,9 @@ class Action(BaseModel):
     pos_from: Optional[int]    # position to move the marble from
     pos_to: Optional[int]      # position to move the marble to
     card_swap: Optional[Card]  # optional card to swap ()
+
+    def __hash__(self):
+        return hash((self.card.suit, self.card.rank, self.pos_from, self.pos_to, self.card_swap))
 
 
 class GamePhase(str, Enum):
@@ -120,7 +125,7 @@ class Dog(Game):
         # Set up players
         for idx in range(self.state.cnt_player):
             list_card = [self.state.list_card_draw.pop() for _ in range(6)]  # Draw 6 cards for each player
-            list_marble = [Marble(pos=None, is_save=False) for _ in range(4)]  # All marbles start in kennel
+            list_marble = [Marble(pos=i, is_save=False) for i in Dog._get_kennel_zone(idx)]  # All marbles start in ken
             player_state = PlayerState(name=f"Player {idx + 1}", list_card=list_card, list_marble=list_marble)
             self.state.list_player.append(player_state)
 
@@ -231,6 +236,8 @@ class Dog(Game):
 
         # "ordinary" move
         ordinary_positions_count = 64  # number of fields without kennels and finish zones
+        print("current_pos", current_pos)
+        print("move_value", move_value)
         new_pos = (current_pos + move_value) % ordinary_positions_count
 
         # if the move value is negative (i.e. for card 4), we return new_pos right away
@@ -248,8 +255,17 @@ class Dog(Game):
     def get_list_action(self) -> List[Action]:
         """ Get a list of possible actions for the active player
 
+        Idea behind the algorithm:
+        - For every possible card (not only the cards the player has), we generate all possible actions.
+        - Only then we filter the actions by the cards the player actually has.
+
+        Reasoning:
+        - This way we can also consider Joker cards, which can be used as any other card and like this, we already have
+        all possible actions for the Joker card.
+
+        Keep in mind that the suit of a card does not matter at all.
+
         TODO: I think the handling for number 7 is not finished. But tests will show.
-        TODO: add test methods for this method and all newly created static methods.
         """
 
         # collect basic information
@@ -262,54 +278,28 @@ class Dog(Game):
         single_suit = [Card(suit="", rank=rank) for rank in "2,3,4,5,6,7,8,9,10,J,Q,K,A".split(",")]
 
         # get blocked kennel exits, where marbles can't pass
-        blocked_exits = []
-        for player in self.state.list_player:
-            for marble in player.list_marble:
-                if marble.is_save:
-                    blocked_exits.append(marble.pos)
+        blocked_exits = self._get_blocked_exits()
 
         # list all possible move-actions
         move_actions = []
         for card in single_suit:
             move_values = Dog._get_move_values(card.rank)
             for move_value in move_values:
-                for marble in marbles:
-                    new_positions = Dog._calculate_new_position(marble.pos, move_value, player_index)
-                    for new_pos in new_positions:
-                        # check if the new position is blocked by a marble fresh out of the kennel
-                        is_blocked = False
-                        for blocked_exit in blocked_exits:
-                            if marble.pos < blocked_exit < new_pos or new_pos < blocked_exit < marble.pos:
-                                is_blocked = True
-                                break
-
-                        # check if the new position would overtake inside safe zone
-                        if new_pos in Dog._get_safe_zone(player_index):
-                            for other_marble in marbles:
-                                if other_marble.pos in Dog._get_safe_zone(player_index) and new_pos >= other_marble.pos:
-                                    is_blocked = True
-                                    break
-
-                        if not is_blocked:
-                            action = Action(card=Card(suit=card.suit, rank=card.rank),
-                                            pos_from=marble.pos,
-                                            pos_to=new_pos,
-                                            card_swap=None)
-                            move_actions.append(action)
+                current_move_actions = self._generate_all_possible_move_actions_for_card(card,
+                                                                                         blocked_exits,
+                                                                                         marbles,
+                                                                                         player_index,
+                                                                                         move_value)
+                move_actions.extend(current_move_actions)
 
         # list all possible swap-actions
         swap_actions = []
         for marble in marbles:
-            if Dog._is_swappable(marble, player_index):
-                for other_player in self.state.list_player:
-                    if other_player != player:
-                        other_player_index = self.state.list_player.index(other_player)
-                        for other_marble in other_player.list_marble:
-                            if Dog._is_swappable(other_marble, other_player_index):
-                                swap_actions.append(Action(card=Card(suit='', rank='J'),
-                                                           pos_from=marble.pos,
-                                                           pos_to=other_marble.pos,
-                                                           card_swap=None))
+            if not Dog._is_swappable(marble, player_index):
+                continue
+
+            current_swaps = self._find_all_swappable_marbles_from_other_players(marble, player)
+            swap_actions.extend(current_swaps)
 
         # list all possible get-out-of-kennel-actions
         get_out_of_kennel_actions = []
@@ -324,30 +314,146 @@ class Dog(Game):
                                                         pos_to=Dog._get_start_field(player_index),
                                                         card_swap=None))
 
+                # break here because all out-of-kennel-actions are the same
+                break
+
         # all possible actions
         all_actions = move_actions + swap_actions + get_out_of_kennel_actions
 
         # filter actions by cards that player actually has
-        player_actions = [
-            Action(card=card,
-                   pos_from=action.pos_from,
-                   pos_to=action.pos_to,
-                   card_swap=None)
-            for action in all_actions
-            for card in cards
-            if action.card.rank == card.rank
-        ]
+        player_actions = []
+        for action in all_actions:
+            for card in cards:
+                if action.card.rank == card.rank:
+                    actual_action = copy.deepcopy(action)
+                    actual_action.card = card
+                    player_actions.append(actual_action)
 
-        # add Joker actions
+        # add Joker actions who can do everything
         if any(card.rank == 'JKR' for card in cards):
-            player_actions.extend(copy.deepcopy(all_actions))
+            jkr_actions = copy.deepcopy(all_actions)
+
+            for i in range(len(jkr_actions)):
+                jkr_actions[i].card = Card(suit='', rank='JKR')
+
+            # remove duplicates
+            jkr_actions = list(set(jkr_actions))
+
+            # add joker actions to player actions
+            player_actions.extend(jkr_actions)
 
         return player_actions
+
+    def _find_all_swappable_marbles_from_other_players(self, marble, player) -> List[Action]:
+        """
+        Find all swappable marbles from players other than given player
+
+        :param marble: current marble to swap
+        :param player: current player
+        :return: list of all possible swap actions
+        """
+        swap_actions = []
+        for other_player in self.state.list_player:
+            if other_player == player:  # no need to swap with yourself
+                continue
+
+            other_player_index = self.state.list_player.index(other_player)
+
+            for other_marble in other_player.list_marble:
+                if not Dog._is_swappable(other_marble, other_player_index):  # no action if marble is not swappable
+                    continue
+
+                swap_actions.append(Action(card=Card(suit='', rank='J'),
+                                           pos_from=marble.pos,
+                                           pos_to=other_marble.pos,
+                                           card_swap=None))
+
+        return swap_actions
+
+    def _generate_all_possible_move_actions_for_card(self,
+                                                     card: Card,
+                                                     blocked_exits: [int],
+                                                     player_marbles: [Marble],
+                                                     player_index: int,
+                                                     card_move_value: int) -> List[Action]:
+        """
+        Generate all possible move actions for the given card.
+
+        :param card: current card
+        :param blocked_exits: all blocked kennel-exits
+        :param player_marbles: all marbles of the player
+        :param player_index: index of the player
+        :param card_move_value: move value of the card
+        :return:
+        """
+        move_actions = []
+        for marble in player_marbles:
+            if not marble.pos:
+                continue
+
+            new_positions = Dog._calculate_new_position(marble.pos, card_move_value, player_index)
+            for new_pos in new_positions:
+                # check if the new position is blocked by a marble fresh out of the kennel
+                is_blocked = self._is_marble_blocked(blocked_exits,
+                                                     marble.pos,
+                                                     new_pos,
+                                                     player_marbles,
+                                                     player_index)
+
+                if not is_blocked:
+                    action = Action(card=Card(suit=card.suit, rank=card.rank),
+                                    pos_from=marble.pos,
+                                    pos_to=new_pos,
+                                    card_swap=None)
+                    move_actions.append(action)
+
+        return move_actions
+
+    @staticmethod
+    def _is_marble_blocked(blocked_exits, current_marble_pos, new_marble_pos, all_marbles, player_index) -> bool:
+        """
+        Check if the new position is blocked by a marble fresh out of the kennel.
+
+        :param blocked_exits: all blocked kennel-exits
+        :param current_marble_pos: current position of the marble
+        :param new_marble_pos: new position of the marble if it moved
+        :param all_marbles: all marbles of the player
+        :param player_index: index of the player
+        :return: True if the new position is blocked, False otherwise
+        """
+        is_blocked = False
+        for blocked_exit in blocked_exits:
+            if current_marble_pos < blocked_exit < new_marble_pos or new_marble_pos < blocked_exit < current_marble_pos:
+                is_blocked = True
+                break
+        # check if the new position would overtake inside safe zone
+        if new_marble_pos in Dog._get_safe_zone(player_index):
+            for other_marble in all_marbles:
+                if other_marble.pos in Dog._get_safe_zone(player_index) and new_marble_pos >= other_marble.pos:
+                    is_blocked = True
+                    break
+        return is_blocked
+
+    def _get_blocked_exits(self) -> [int]:
+        """
+        Get all blocked exits, where marbles can't pass.
+
+        :return: blocked exits
+        """
+        blocked_exits = []
+        for player in self.state.list_player:
+            for marble in player.list_marble:
+                if marble.is_save:
+                    blocked_exits.append(marble.pos)
+        return blocked_exits
 
     @staticmethod
     def _is_swappable(marble: Marble, player_index: int) -> bool:
         """ Check if the marble is swappable with another player's marble,
          i.e. not in kennel, start field or already saved """
+        if not marble.pos:
+            return False
+
         return (marble.pos not in Dog._get_kennel_zone(player_index) and
                 marble.pos not in Dog._get_safe_zone(player_index) and
                 not marble.is_save)
@@ -403,49 +509,37 @@ class RandomPlayer(Player):
 
 if __name__ == '__main__':
 
-    # game = Dog()
-    #
-    # # Get the initial state of the game and print it
-    # initial_state = game.get_state()
-    # print("Initial Game State:")
-    # print(initial_state)
-    #
-    # # Simulate setting up the next rounds to see how the card distribution changes
-    # for round_num in range(1, 4):
-    #     game.setup_next_round()
-    #     print(f"\nGame State after setting up round {round_num + 1}:")
-    #     print(game.get_state())
-    #
-    # # Simulate a few turns to see how the game progresses
-    # print("\nStarting turns simulation:")
-    # for turn in range(6):
-    #     # Example of getting available actions (currently, not implemented)
-    #     actions = game.get_list_action()
-    #     if actions:
-    #         # Apply a random action (using RandomPlayer logic as an example)
-    #         action = random.choice(actions)
-    #         game.apply_action(action)
-    #     else:
-    #         # If no valid actions, skip the turn
-    #         game.next_turn()
-    #
-    #     # Print the game state after each turn
-    #     print(f"\nGame State after turn {turn + 1}:")
-    #     print(game.get_state())
-    #
-    # # Reset the game and print the reset state
-    # game.reset()
-    # print("\nGame State after resetting:")
-    # print(game.get_state())
-
     game = Dog()
-    game.state.idx_player_active = 0
-    game.state.list_player[0].list_card = [Card(suit='♠', rank='2'), Card(suit='♠', rank='4')]
-    game.state.list_player[0].list_marble = [Marble(pos=0, is_save=False), Marble(pos=64, is_save=False)]
-    print("here 1")
-    actions = game.get_list_action()
-    print("here 2")
-    assert len(actions) == 3
-    assert Action(card=Card(suit='♠', rank='2'), pos_from=0, pos_to=2) in actions
-    assert Action(card=Card(suit='♠', rank='4'), pos_from=0, pos_to=4) in actions
-    assert Action(card=Card(suit='♠', rank='4'), pos_from=0, pos_to=60) in actions
+
+    # Get the initial state of the game and print it
+    initial_state = game.get_state()
+    print("Initial Game State:")
+    print(initial_state)
+
+    # Simulate setting up the next rounds to see how the card distribution changes
+    for round_num in range(1, 4):
+        game.setup_next_round()
+        print(f"\nGame State after setting up round {round_num + 1}:")
+        print(game.get_state())
+
+    # Simulate a few turns to see how the game progresses
+    print("\nStarting turns simulation:")
+    for turn in range(6):
+        # Example of getting available actions (currently, not implemented)
+        actions = game.get_list_action()
+        if actions:
+            # Apply a random action (using RandomPlayer logic as an example)
+            action = random.choice(actions)
+            game.apply_action(action)
+        else:
+            # If no valid actions, skip the turn
+            game.next_turn()
+
+        # Print the game state after each turn
+        print(f"\nGame State after turn {turn + 1}:")
+        print(game.get_state())
+
+    # Reset the game and print the reset state
+    game.reset()
+    print("\nGame State after resetting:")
+    print(game.get_state())
