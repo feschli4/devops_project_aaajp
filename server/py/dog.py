@@ -1,9 +1,9 @@
 # runcmd: cd ../.. & venv\Scripts\python server/py/dog_template.py
-from server.py.game import Game, Player
-from typing import List, Optional, ClassVar
-from pydantic import BaseModel
+from typing import List, Optional, ClassVar, Union # corrected order of imports for pydantic
 from enum import Enum
 import random
+from pydantic import BaseModel
+from server.py.game import Game, Player
 
 
 class Card(BaseModel):
@@ -26,7 +26,7 @@ class Action(BaseModel):
     card: Card                 # card to play
     pos_from: Optional[int]    # position to move the marble from
     pos_to: Optional[int]      # position to move the marble to
-    card_swap: Optional[Card]  # optional card to swap ()
+    card_swap: Optional[Card] = None # optional card to swap ()
 
 
 class GamePhase(str, Enum):
@@ -87,9 +87,37 @@ class GameState(BaseModel):
 
 class Dog(Game):
 
+    PLAYER_BOARD_SEGMENTS = {
+        0: {'start': 0, 'queue_start': 64, 'final_start': 68},
+        1: {'start': 16, 'queue_start': 72, 'final_start': 76},
+        2: {'start': 32, 'queue_start': 80, 'final_start': 84},
+        3: {'start': 48, 'queue_start': 88, 'final_start': 92}
+    }
+
+    # Main path length (without final segment)
+    MAIN_PATH_LENGTH = 64
+
+    CARD_MOVEMENTS = {
+        '2': 2,
+        '3': 3,
+        '4': -4,  # Rückwärtsbewegung
+        '5': 5,
+        '6': 6,
+        '8': 8,
+        '9': 9,
+        '10': 10,
+        'Q': 12,
+        'K': 13,
+        'J': None,  # Keine Bewegung, wird für Austausch genutzt
+    }
+
+    ACE_OPTIONS = [1, 11]  # Ace kann 1 oder 11 sein
+    JOKER_OPTIONS = [1, 2, 3, 5, 6, 8, 9, 10, 12, 13]  # Joker ist flexibel
+    SEVEN_OPTIONS = [1, 2, 3, 4, 5, 6, 7]  # Split-Möglichkeiten für SEVEN
+
     def __init__(self, cnt_players: int = 4) -> None:
         """ Game initialization (set_state call not necessary, we expect 4 players) """
-        self.state = None
+        self.state: Optional[GameState] = None
         self._initialize_game(cnt_players)
 
     def _initialize_game(self, cnt_players: int) -> None:
@@ -149,39 +177,186 @@ class Dog(Game):
         """ Setup the next round with decreasing number of cards """
         cards_in_round = [6, 5, 4, 3, 2]  # Anzahl der Karten für jede Runde (beginnend mit Runde 1)
         current_cards_count = cards_in_round[(self.state.cnt_round - 1) % len(cards_in_round)]
-        # Deal cards to each player
+
+        # Shuffle discard pile into draw pile if needed
+        if not self.state.list_card_draw and self.state.list_card_discard: # Nachziehstapel leer
+            print("Shuffling discard pile into draw pile.")
+            self.state.list_card_draw = self.state.list_card_discard.copy() # Kopiere Ablagestapel
+            self.state.list_card_discard.clear() # Leere Ablagestapel
+            random.shuffle(self.state.list_card_draw) # Mische den Stapel
+
+        # Deal cards to players
         for player in self.state.list_player:
-            player.list_card = [self.state.list_card_draw.pop() for _ in range(current_cards_count) if
-                                self.state.list_card_draw]
-        # TODO:: Test re-shuffle if stock out of cards (list_card_draw)
+            while len(player.list_card) < current_cards_count and self.state.list_card_draw:
+                player.list_card.append(self.state.list_card_draw.pop())
+
+        print(f"Round {self.state.cnt_round}: Draw pile: {len(self.state.list_card_draw)}, "
+              f"Discard pile: {len(self.state.list_card_discard)}, "
+              f"Player hands: {[len(player.list_card) for player in self.state.list_player]}")
+
 
     def next_turn(self) -> None:
         """ Advance the turn to the next player """
         self.state.idx_player_active = (self.state.idx_player_active + 1) % self.state.cnt_player
-        # If all players have played, increase the round count
+
+        # Überprüfen, ob alle Spieler gespielt haben, um die Runde zu erhöhen
         if self.state.idx_player_active == self.state.idx_player_started:
             self.state.cnt_round += 1
-            # self.exchange_cards() # TODO:: Exchange cards between players
-            self.setup_next_round()  # Setup the next round with updated card counts
+            self.setup_next_round()
 
+    def _get_start_actions(self, card: Card, player: PlayerState) -> List[Action]:
+        """Generiere Aktionen für Karten, die Marbles aus dem Kennel starten."""
+        actions = []
+        if card.rank in ['A', 'K', 'JKR']:
+            for marble in player.list_marble:
+                if marble.pos is None:  # Marble is in kennel
+                    start_pos = self.PLAYER_BOARD_SEGMENTS[self.state.idx_player_active]['start']
+                    if self.is_valid_move(None, start_pos):
+                        actions.append(Action(card=card, pos_from=None, pos_to=start_pos))
+        return actions
+
+    def _get_standard_actions(self, card: Card, player: PlayerState, move_distance: Union[int, List[int]]) -> List[
+        Action]:
+        """Generiere Aktionen für Standardkarten."""
+        actions = []
+        if isinstance(move_distance, list):  # Mehrere Bewegungsmöglichkeiten (z.B. ACE, SEVEN)
+            for distance in move_distance:
+                for marble in player.list_marble:
+                    if marble.pos is not None:
+                        pos_to = (marble.pos + distance) % self.MAIN_PATH_LENGTH
+                        if self.is_valid_move(marble.pos, pos_to):
+                            actions.append(Action(card=card, pos_from=marble.pos, pos_to=pos_to))
+        elif isinstance(move_distance, int):  # Einzelbewegung
+            for marble in player.list_marble:
+                if marble.pos is not None:
+                    pos_to = (marble.pos + move_distance) % self.MAIN_PATH_LENGTH
+                    if self.is_valid_move(marble.pos, pos_to):
+                        actions.append(Action(card=card, pos_from=marble.pos, pos_to=pos_to))
+        return actions
 
     def get_list_action(self) -> List[Action]:
         """ Get a list of possible actions for the active player """
-        pass
+        # ::TODO: Test 003-005 - Fetch valid actions based on cards in hand (get_valid_actions())
+        possible_actions = []
+        player = self.state.list_player[self.state.idx_player_active]
+
+        for card in player.list_card:
+            move_distance = self.get_move_distance(card)
+
+            # Aktionen für Startkarten
+            possible_actions.extend(self._get_start_actions(card, player))
+
+            # Aktionen für Standardkarten
+            if move_distance is not None:
+                possible_actions.extend(self._get_standard_actions(card, player, move_distance))
+
+        return possible_actions
+
+    def is_valid_move(self, pos_from: int, pos_to: int) -> bool:
+        """ Check if a move is valid """
+        if pos_from is None:  # Start aus dem Kennel
+            start_pos = self.PLAYER_BOARD_SEGMENTS[self.state.idx_player_active]['start']
+            # Stelle sicher, dass die Startposition frei ist
+            return pos_to == start_pos and all(
+                marble.pos != start_pos for marble in self.state.list_player[self.state.idx_player_active].list_marble
+            )
+        # Standardbewegungen (z.B. keine Blockade)
+        return True
+
 
     def apply_action(self, action: Action) -> None:
         """ Apply the given action to the game """
+        # Hole den aktiven Spieler unabhängig davon, ob eine Aktion vorhanden ist
+        player = self.state.list_player[self.state.idx_player_active]
+
         if action is None:
-            # print("No valid action provided. Skipping turn.")
+            if not self.get_list_action():  # No valid actions
+                if player.list_card:  # Only discard if cards are present
+                    print(f"Discarding cards for Player {self.state.idx_player_active}: {player.list_card}")
+                    self.state.list_card_discard.extend(player.list_card)
+                    player.list_card.clear()
+                else:
+                    print(f"Player {self.state.idx_player_active} has no cards to discard.")
             self.next_turn()
             return
-        player = self.state.list_player[self.state.idx_player_active]
-        # Remove the card from the player's hand
+
+        # Reshuffle prüfen
+        if not self.state.list_card_draw:
+            print("Nachziehstapel leer - Reshuffle des Ablagestapels.")
+            if self.state.list_card_discard:
+                self.state.list_card_draw = self.state.list_card_discard.copy()
+                self.state.list_card_discard.clear()
+                random.shuffle(self.state.list_card_draw)
+            else:
+                raise ValueError("Keine Karten mehr verfügbar, weder im Nachzieh- noch im Ablagestapel.")
+
+        if action.pos_from is None:  # Start aus dem Kennel
+            marble = next((m for m in player.list_marble if m.pos is None), None)
+        else:
+            marble = next((m for m in player.list_marble if m.pos == action.pos_from), None)
+
+        if marble is None:
+            self.next_turn() # Keine gültige Marble gefunden für die Aktion
+            return
+
+        # Bewegung anwenden
+        marble.pos = action.pos_to
+        if action.pos_to == self.PLAYER_BOARD_SEGMENTS[self.state.idx_player_active]['start']:
+            marble.is_save = True  # Marble ist sicher
+
+        # Entferne die Karte und lege sie ab
         player.list_card.remove(action.card)
         self.state.list_card_discard.append(action.card)
-        # TODO:: Move the marble if applicable
-        # Advance to the next player
+
+        # Nächster Spieler
         self.next_turn()
+
+    def check_game_status(self) -> None:
+        """ Überprüft, ob das Spiel beendet ist """
+        for player in self.state.list_player:
+            if all(marble.pos is not None and marble.pos >= self.MAIN_PATH_LENGTH for marble in player.list_marble):
+                self.state.phase = GamePhase.FINISHED
+                print(f"Das Spiel ist beendet! Spieler {player.name} hat gewonnen.")
+
+
+    def get_move_distance(self, card: Card) -> Optional[Union[int, List[int]]]:
+        """
+        Get the move distance based on the card rank. Implements special rules for ACE, SEVEN, and JOKER.
+        """
+        if card.rank in self.CARD_MOVEMENTS:
+            return self.CARD_MOVEMENTS[card.rank]
+        if card.rank == 'A':
+            return self.ACE_OPTIONS
+        if card.rank == '7':
+            return self.SEVEN_OPTIONS
+        if card.rank == 'JKR':
+            return self.JOKER_OPTIONS
+
+        # Standardfall: Ungültige Karte
+        print(f"Warnung: Ungültige Karte {card.rank}. Keine Bewegung möglich.")
+        return None
+
+    def split_seven_move(self, steps: int) -> List[List[int]]:
+        """Teilt die SEVEN-Karte in mögliche Bewegungen auf."""
+        # ::TODO: Test 029-035 - Implement logic for splitting SEVEN card moves (move_with_seven_card())
+        if steps != 7:
+            raise ValueError("Nur 7 Schritte können gesplittet werden.")
+
+        results = []
+
+        def backtrack(path, remaining):
+            if remaining == 0 and path:
+                results.append(path[:])
+                return
+            for i in range(1, 8):  # Schritte von 1 bis 7
+                if i > remaining:
+                    break
+                path.append(i)
+                backtrack(path, remaining - i)
+                path.pop()
+
+        backtrack([], steps)
+        return results
 
     def get_player_view(self, idx_player: int) -> GameState:
         """ Get the masked state for the active player (e.g. the oppontent's cards are face down)"""
@@ -219,37 +394,47 @@ class RandomPlayer(Player):
 
 if __name__ == '__main__':
 
+    # Initialize the game
     game = Dog()
 
-    # Get the initial state of the game and print it
-    initial_state = game.get_state()
+    # Step 1: Print initial game state
     print("Initial Game State:")
+    initial_state = game.get_state()
     print(initial_state)
 
-    # Simulate setting up the next rounds to see how the card distribution changes
+    # Step 2: Simulate several rounds
+    print("\nSimulating 3 Rounds of the Game...")
     for round_num in range(1, 4):
-        game.setup_next_round()
-        print(f"\nGame State after setting up round {round_num + 1}:")
-        print(game.get_state())
+        print(f"\n--- Round {round_num} ---")
 
-    # Simulate a few turns to see how the game progresses
-    print("\nStarting turns simulation:")
-    for turn in range(6):
-        # Example of getting available actions (currently, not implemented)
-        actions = game.get_list_action()
-        if actions:
-            # Apply a random action (using RandomPlayer logic as an example)
-            action = random.choice(actions)
-            game.apply_action(action)
-        else:
-            # If no valid actions, skip the turn
-            game.next_turn()
+        for _ in range(game.state.cnt_player):  # Each player gets a turn
+            print(f"\nPlayer {game.state.idx_player_active + 1}'s Turn")
 
-        # Print the game state after each turn
-        print(f"\nGame State after turn {turn + 1}:")
-        print(game.get_state())
+            # Get available actions
+            available_actions = game.get_list_action()
 
-    # Reset the game and print the reset state
+            if available_actions:
+                # Randomly select an action and apply it
+                selected_action = random.choice(available_actions)
+                print(f"Selected Action: {selected_action}")
+                game.apply_action(selected_action)
+            else:
+                # If no actions are available, discard cards
+                print("No valid actions available. Discarding cards.")
+                game.apply_action(None)
+
+            # Print game state after each turn
+            print("\nGame State after the Turn:")
+            print(game.get_state())
+
+        # Check if the game is finished
+        game.check_game_status()
+        if game.state.phase == GamePhase.FINISHED:
+            print(f"\nGame Over! Player {game.state.idx_player_active + 1} Wins!")
+            break
+
+    # Step 3: Reset the game and print the final state
+    print("\nResetting the Game...")
     game.reset()
-    print("\nGame State after resetting:")
+    print("Game State after Reset:")
     print(game.get_state())
