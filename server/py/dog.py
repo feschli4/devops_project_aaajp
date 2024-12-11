@@ -1,7 +1,7 @@
 # runcmd: cd ../.. & venv\Scripts\python server/py/dog_template.py
 from server.py.game import Game, Player
 from typing import List, Optional, ClassVar
-from pydantic import BaseModel
+from pydantic import BaseModel, Field as PydanticField
 from enum import Enum
 import random
 
@@ -16,40 +16,60 @@ class Marble(BaseModel):
     is_save: bool  # true if marble was moved out of kennel and was not yet moved
 
 class Board(BaseModel):
+    fields: List[Optional["Board.Field"]] = PydanticField(default_factory=list)
 
-    def __init__(self) -> None:
-        pass
+    class Field(BaseModel):
+        idx: int
+        occupied: bool = False
+        occupying_player: Optional[int] = None
+        occupying_marble: Optional[int] = None
 
-    class Field():
-        def __init__(self) -> None:
-            self._occupied = False
-            self._occupying_player = None
-            self._occupying_marble = None
-            return
+        @property
+        def f_occupied(self) -> bool:
+            return self.occupied
 
-        @property.setter
-        def set_occupied(self, player_id: int, marble_id: int) -> None:
-            if self._occupied is True:
-                print(f"Das Feld ist bereits durch {self._occupying_player} besetzt")
-                # expecting the class Marble to have a funtion send home. This will be added here
-            else:
-                self._occupied == True
+        @f_occupied.setter
+        def f_occupied(self, player_idx: int, marble_idx: int) -> None:
+            self.occupied = True
+            self.occupying_player = player_idx
+            self.occupying_marble = marble_idx
 
-            self._occupying_player = player_id
-            self._occupying_marble = marble_id
-                  
+        def check_occupied(self, player: Player, marble: Marble) -> None: # WIP
+            if f_occupied(self):
+                # Marble send home mechanic
+                self.occupied = [player._idx, marble._idx]
+
     class StartField(Field):
-        def __init__(self, player_id: int) -> None:
-                self._owner = player_id
+        owner: int
 
     class Kennel(Field):
-        def __init__(self) -> None:
-                self._marble_count = 4
-            
+        owner: int
 
     class House(Field):
-        #
-        pass
+        owner: int
+
+    @classmethod
+    def create_board(cls) -> "Board":
+        board = cls()
+        owner_s = 0
+
+        for i in range(64):
+            if i % 16 == 0:
+                board.fields.append(cls.StartField(idx=i, owner=owner_s))
+                owner_s += 1
+            else:
+                board.fields.append(cls.Field(idx=i))
+
+        for k in range(64, 96):
+            group = (k - 64) // 8
+            sub_index = (k - 64) % 8
+            if sub_index < 4:
+                board.fields.append(cls.Kennel(idx=k, owner=group))
+            else:
+                board.fields.append(cls.House(idx=k, owner=group))
+
+        return board
+
 
 
 class PlayerState(BaseModel):
