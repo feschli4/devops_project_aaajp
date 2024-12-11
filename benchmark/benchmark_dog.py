@@ -163,7 +163,7 @@ class DogBenchmark(benchmark.Benchmark):
         self.game_server.set_state(state)
         str_state_1 = str(state)
 
-        action = Action(card=Card(suit='♦', rank='A'), pos_from=64, pos_to=0)
+        action = Action(card=Card(suit='♦', rank='A'), pos_from=64, pos_to=0, card_swap=None)
         self.game_server.apply_action(action)
         str_action = f'Action: {action}\n'
 

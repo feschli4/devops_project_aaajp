@@ -180,6 +180,29 @@ class Dog(Game):
         player.list_card.remove(action.card)
         self.state.list_card_discard.append(action.card)
         # TODO:: Move the marble if applicable
+
+        ###################
+        #DA-40
+        kennel_to_start = {
+            64: 0, 65: 0, 66: 0, 67: 0,  # Blau
+            88: 48, 89: 48, 90: 48, 91: 48,  # Gelb
+            83: 32, 82: 32, 81: 32, 80: 32,  # Rot
+            75: 16, 74: 16, 73: 16, 72: 16  # Grün
+        }
+
+        #dummy list (solange keine list_marble vorhanden)
+        player.list_marble = [
+            Marble(pos=64, is_save=False),  # Marble in der Startposition
+            Marble(pos=65, is_save=False),  # Weitere Marble im Startbereich
+            Marble(pos=66, is_save=False),  # Weitere Marble im Startbereich
+            Marble(pos=67, is_save=False)  # Weitere Marble im Startbereich
+        ]
+
+        if action.pos_from in kennel_to_start and action.pos_to == kennel_to_start[action.pos_from]:
+            # call function to move marble out of kennel
+            self.move_marble_out_of_kennel(action)
+        ###################
+
         # Advance to the next player
         self.next_turn()
 
@@ -208,7 +231,7 @@ class Dog(Game):
         player2.list_card.remove(card2)
         player1.list_card.append(card2)
 
-######### DA-34
+######### DA-40
     # def move_marble_out_of_kennel(self, action: Action) -> None:
     #     """
     #     Move a marble out of the kennel if the action and conditions are valid.
@@ -276,27 +299,28 @@ class Dog(Game):
         player = test_player or state.list_player[state.idx_player_active]
 
         # Map kennel positions to start positions
-        kennel_to_start = {
-            64: 0, 65: 0, 66: 0, 67: 0,  # Blau
-            88: 48, 89: 48, 90: 48, 91: 48,  # Gelb
-            83: 32, 82: 32, 81: 32, 80: 32,  # Rot
-            75: 16, 74: 16, 73: 16, 72: 16  # Grün
-        }
+        if test_player:
+            kennel_to_start = {
+                64: 0, 65: 0, 66: 0, 67: 0,  # Blau
+                88: 48, 89: 48, 90: 48, 91: 48,  # Gelb
+                83: 32, 82: 32, 81: 32, 80: 32,  # Rot
+                75: 16, 74: 16, 73: 16, 72: 16  # Grün
+            }
 
         # Validate the action
-        if action.pos_from not in kennel_to_start:
-            raise ValueError(f"Invalid kennel position: {action.pos_from}.")
-        if action.pos_to != kennel_to_start[action.pos_from]:
-            raise ValueError(
-                f"Marble must move to the correct start position: {kennel_to_start[action.pos_from]}, not {action.pos_to}."
-            )
+            if action.pos_from not in kennel_to_start:
+                raise ValueError(f"Invalid kennel position: {action.pos_from}.")
+            if action.pos_to != kennel_to_start[action.pos_from]:
+                raise ValueError(
+                    f"Marble must move to the correct start position: {kennel_to_start[action.pos_from]}, not {action.pos_to}."
+                )
 
         # Validate the card
-        if action.card.rank not in {'A', 'K'}:
-            raise ValueError(f"Card {action.card.rank} cannot be used to move a marble out of the kennel.")
+            if action.card.rank not in {'A', 'K'}:
+                raise ValueError(f"Card {action.card.rank} cannot be used to move a marble out of the kennel.")
 
-        if action.card not in player.list_card:
-            raise ValueError(f"Player {player.name} does not have the card {action.card.rank}.")
+            if action.card not in player.list_card:
+                raise ValueError(f"Player {player.name} does not have the card {action.card.rank}.")
 
         # Find and move the marble
         marble = next((m for m in player.list_marble if m.pos == action.pos_from), None)
@@ -308,8 +332,9 @@ class Dog(Game):
         marble.is_save = True  # Mark the marble as safe after moving out
 
         # Update card state
-        player.list_card.remove(action.card)
-        state.list_card_discard.append(action.card)
+        if test_player:
+            player.list_card.remove(action.card)
+            state.list_card_discard.append(action.card)
 
 class RandomPlayer(Player):
 

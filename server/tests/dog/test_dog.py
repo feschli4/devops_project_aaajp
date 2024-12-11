@@ -149,7 +149,7 @@ def test_number_of_cards_in_round_2():
         assert len(player.list_card) == 5, f'Error: Expected 5 cards in round 2, found {len(player.list_card)}'
 
 #################################################
-# DA-34
+# DA-40
 @pytest.fixture
 def game34():
     """Fixture zur Initialisierung eines Spiels."""
