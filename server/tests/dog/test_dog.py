@@ -151,18 +151,18 @@ def test_number_of_cards_in_round_2():
 #################################################
 # DA-40
 @pytest.fixture
-def game34():
+def game40():
     """Fixture zur Initialisierung eines Spiels."""
     game_server = Dog(cnt_players=4)  # Beispiel für die Initialisierung des Spiels
     return game_server
 
 
-def test_move_out_of_kennel_1(game34):
+def test_move_out_of_kennel_1(game40):
     """Test 006: Test move out of kennel without marble on start [1 point]"""
 
     # Reset GameState
-    game34.reset()
-    state = game34.get_state()
+    game40.reset()
+    state = game40.get_state()
 
     # Set the test state
     idx_player_active = 0
@@ -178,7 +178,7 @@ def test_move_out_of_kennel_1(game34):
         Marble(pos=66, is_save=False),  # Weitere Marble im Startbereich
         Marble(pos=67, is_save=False)  # Weitere Marble im Startbereich
     ]
-    game34.set_state(state)
+    game40.set_state(state)
 
     # Save the initial state for debugging
     str_state_1 = str(state)
@@ -187,11 +187,11 @@ def test_move_out_of_kennel_1(game34):
     action = Action(card=Card(suit='♦', rank='A'), pos_from=64, pos_to=0, card_swap=None)
 
     # Call the function with explicit test state and player
-    game34.move_marble_out_of_kennel(action, test_player=player, test_state=state)
+    game40.move_marble_out_of_kennel(action, test_player=player, test_state=state)
 
     # Save the action and new state for debugging
     str_action = f'Action: {action}\n'
-    state = game34.get_state()
+    state = game40.get_state()
     str_state_2 = str(state)
 
     # Validate the result

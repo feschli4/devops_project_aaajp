@@ -232,73 +232,17 @@ class Dog(Game):
         player1.list_card.append(card2)
 
 ######### DA-40
-    # def move_marble_out_of_kennel(self, action: Action) -> None:
-    #     """
-    #     Move a marble out of the kennel if the action and conditions are valid.
-    #     """
-    #     # Get the active player
-    #     player = self.state.list_player[self.state.idx_player_active]
-    #
-    #     #################################################
-    #     # Manuell changes -> just for testing!!!!
-    #     if not any(card.rank == 'A' and card.suit == '♥' for card in player.list_card):
-    #         # add heart ass to list_card if not available
-    #         player.list_card.append(Card(rank='A', suit='♥'))
-    #
-    #
-    #     marble = next((m for m in player.list_marble if m.pos == action.pos_from), None)
-    #     if not marble:
-    #         # add a marble if the list_marble is empty
-    #         marble = Marble(pos=action.pos_from, is_save=False)
-    #         player.list_marble = [marble]
-    #
-    #     ##########################
-    #
-    #         # Map kennel positions to start positions
-    #     kennel_to_start = {
-    #         64: 0, 65: 0, 66: 0, 67: 0,  # Blau
-    #         88: 48, 89: 48, 90: 48, 91: 48,  # Gelb
-    #         83: 32, 82: 32, 81: 32, 80: 32,  # Rot
-    #         75: 16, 74: 16, 73: 16, 72: 16  # Grün
-    #     }
-    #
-    #     # Validate the action
-    #     if action.pos_from not in kennel_to_start:
-    #         raise ValueError(f"Invalid kennel position: {action.pos_from}.")
-    #     if action.pos_to != kennel_to_start[action.pos_from]:
-    #         raise ValueError(
-    #             f"Marble must move to the correct start position: {kennel_to_start[action.pos_from]}, not {action.pos_to}."
-    #         )
-    #
-    #     # Validate the card
-    #     if action.card.rank not in {'A', 'K'}:
-    #         raise ValueError(f"Card {action.card.rank} cannot be used to move a marble out of the kennel.")
-    #
-    #     if action.card not in player.list_card:
-    #         raise ValueError(f"Player {player.name} does not have the card {action.card.rank}.")
-    #
-    #     # Find and move the marble
-    #     marble = next((m for m in player.list_marble if m.pos == action.pos_from), None)
-    #     if not marble:
-    #         raise ValueError(f"No marble found at kennel position {action.pos_from}.")
-    #
-    #     # Execute the action
-    #     marble.pos = action.pos_to
-    #     marble.is_save = True  # Mark the marble as safe after moving out
-    #
-    #     # Update card state
-    #     player.list_card.remove(action.card)
-    #     self.state.list_card_discard.append(action.card)
-
     def move_marble_out_of_kennel(self, action: Action, test_player: PlayerState = None, test_state: GameState = None) -> None:
         """
         Move a marble out of the kennel if the action and conditions are valid.
         """
-        # Verwende den Testzustand, wenn er übergeben wurde
+        # Use test parameters/settings when test is running
         state = test_state or self.state
         player = test_player or state.list_player[state.idx_player_active]
 
-        # Map kennel positions to start positions
+        #######################################################
+        #code lines just for test run -> necessary for having test scenario/parameters available and not global settings
+        # Map kennel positions to start positions for test run
         if test_player:
             kennel_to_start = {
                 64: 0, 65: 0, 66: 0, 67: 0,  # Blau
@@ -307,7 +251,7 @@ class Dog(Game):
                 75: 16, 74: 16, 73: 16, 72: 16  # Grün
             }
 
-        # Validate the action
+            # Validate the action
             if action.pos_from not in kennel_to_start:
                 raise ValueError(f"Invalid kennel position: {action.pos_from}.")
             if action.pos_to != kennel_to_start[action.pos_from]:
@@ -315,12 +259,18 @@ class Dog(Game):
                     f"Marble must move to the correct start position: {kennel_to_start[action.pos_from]}, not {action.pos_to}."
                 )
 
-        # Validate the card
+            # Validate the card
             if action.card.rank not in {'A', 'K'}:
                 raise ValueError(f"Card {action.card.rank} cannot be used to move a marble out of the kennel.")
 
             if action.card not in player.list_card:
                 raise ValueError(f"Player {player.name} does not have the card {action.card.rank}.")
+
+            # Update card state
+            player.list_card.remove(action.card)
+            state.list_card_discard.append(action.card)
+
+        #######################################################
 
         # Find and move the marble
         marble = next((m for m in player.list_marble if m.pos == action.pos_from), None)
@@ -330,11 +280,6 @@ class Dog(Game):
         # Execute the action
         marble.pos = action.pos_to
         marble.is_save = True  # Mark the marble as safe after moving out
-
-        # Update card state
-        if test_player:
-            player.list_card.remove(action.card)
-            state.list_card_discard.append(action.card)
 
 class RandomPlayer(Player):
 
