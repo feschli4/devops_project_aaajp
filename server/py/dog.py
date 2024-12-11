@@ -1,10 +1,9 @@
 # runcmd: cd ../.. & venv\Scripts\python server/py/dog_template.py
-from server.py.game import Game, Player
 from typing import List, Optional, ClassVar
-from pydantic import BaseModel
 from enum import Enum
 import random
-
+from pydantic import BaseModel
+from server.py.game import Game, Player
 
 class Card(BaseModel):
     suit: str  # card suit (color)
@@ -14,6 +13,12 @@ class Card(BaseModel):
 class Marble(BaseModel):
     pos: Optional[int] = None       # position on board (0 to 95)
     is_save: bool  # true if marble was moved out of kennel and was not yet moved
+    Marbles: list = []
+    idx: int
+    owner: int
+
+    def __init__(self):
+        Marble.marbles.append(self)
 
 
 class PlayerState(BaseModel):
@@ -207,6 +212,30 @@ class Dog(Game):
         # Entferne die Karte von Spieler 2 und füge sie zu Spieler 1 hinzu
         player2.list_card.remove(card2)
         player1.list_card.append(card2)
+
+    def marbles_to_swap(self, player: int) -> tuple[list[Marble], list[Marble]]:
+                marbles_to_swap_from: list = [] # Start Marble
+                marbles_to_swap_with: list = [] # End Marlbe
+                
+                for marble in Marble.marbles:
+                    if marble.owner == player.idx and not(type(marble.pos) in ["Board.Kennel", "Board.House"] or marble.is_save):
+                        marbles_to_swap_from.append(marble)
+                    elif not(type(marble.pos) in ["Board.Kennel", "Board.Hous"] or marble.is_save):
+                        marbles_to_swap_with.append(marble)
+                return marbles_to_swap_from, marbles_to_swap_with
+    
+    def swap_marbles(self, player: Player) -> None:
+
+        def pick_marble(marbles: List[Marble]) -> int:
+            pass
+
+        marbles_to_swap_from, marbles_to_swap_with =  marbles_to_swap(player.idx)
+
+        if marbles_to_swap_from == [] or marbles_to_swap_with == []:      #Only as a double check, as this card should no be in the list of actions if this applies.
+                raise Exception("No Marbles available to swap.")
+
+        selected_marble_from = pick_marble(marbles_to_swap_from)
+        selected_marble_with = pick_marble(marbles_to_swap_with)
 
 class RandomPlayer(Player):
 
