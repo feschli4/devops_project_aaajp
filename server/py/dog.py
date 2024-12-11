@@ -35,7 +35,7 @@ class Board(BaseModel):
             self.occupying_marble = marble_idx
 
         def check_occupied(self, player: Player, marble: Marble) -> None: # WIP
-            if f_occupied(self):
+            if self.f_occupied():
                 # Marble send home mechanic
                 self.occupied = [player._idx, marble._idx]
 
