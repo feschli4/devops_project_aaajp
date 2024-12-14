@@ -346,6 +346,45 @@ class Dog(Game):
                     done_pairs.add((marble_j.pos, marble_i.pos))
         return actions
 
+    def _get_jack_actions(self, card: Card) -> List[Action]:
+        assert self.state is not None
+        controlled = self._controlled_player_indices()
+        my_marbles = [
+            m
+            for i in controlled
+            for m in self.state.list_player[i].list_marble
+            if m.pos < self.MAIN_PATH_LENGTH
+        ]
+        opponent_marbles: List[int] = []
+        for p_idx, p in enumerate(self.state.list_player):
+            if p_idx not in controlled:
+                opponent_marbles.extend(
+                    mm.pos
+                    for mm in p.list_marble
+                    if mm.pos < self.MAIN_PATH_LENGTH and not (
+                            mm.pos == self.PLAYER_BOARD_SEGMENTS[p_idx]['start'] and mm.is_save
+                    )
+                )
+        actions: List[Action] = [
+            Action(card=Card(suit=card.suit, rank=card.rank), pos_from=mm.pos, pos_to=o_pos)
+            for mm in my_marbles
+            for o_pos in opponent_marbles
+        ]
+        actions += [
+            Action(card=Card(suit=card.suit, rank=card.rank), pos_from=o_pos, pos_to=mm.pos)
+            for mm in my_marbles
+            for o_pos in opponent_marbles
+        ]
+        safe_marbles = [
+            m
+            for i in controlled
+            for m in self.state.list_player[i].list_marble
+            if m.pos < self.MAIN_PATH_LENGTH and m.is_save
+        ]
+        if not actions and len(safe_marbles) >= 2:
+            actions.extend(self._get_safe_marble_actions_for_jack(safe_marbles, card))
+        return actions
+
     def _get_standard_actions(self, card: Card, move_distance: Union[int, List[int]]) -> List[Action]:
         assert self.state is not None
         actions: List[Action] = []
@@ -405,45 +444,6 @@ class Dog(Game):
         dist_main = self.MAIN_PATH_LENGTH - pf
         dist_finish = final_start - self.MAIN_PATH_LENGTH
         return dist_main + dist_finish
-
-    def _get_jack_actions(self, card: Card) -> List[Action]:
-        assert self.state is not None
-        controlled = self._controlled_player_indices()
-        my_marbles = [
-            m
-            for i in controlled
-            for m in self.state.list_player[i].list_marble
-            if m.pos < self.MAIN_PATH_LENGTH
-        ]
-        opponent_marbles: List[int] = []
-        for p_idx, p in enumerate(self.state.list_player):
-            if p_idx not in controlled:
-                opponent_marbles.extend(
-                    mm.pos
-                    for mm in p.list_marble
-                    if mm.pos < self.MAIN_PATH_LENGTH and not (
-                            mm.pos == self.PLAYER_BOARD_SEGMENTS[p_idx]['start'] and mm.is_save
-                    )
-                )
-        actions: List[Action] = [
-            Action(card=Card(suit=card.suit, rank=card.rank), pos_from=mm.pos, pos_to=o_pos)
-            for mm in my_marbles
-            for o_pos in opponent_marbles
-        ]
-        actions += [
-            Action(card=Card(suit=card.suit, rank=card.rank), pos_from=o_pos, pos_to=mm.pos)
-            for mm in my_marbles
-            for o_pos in opponent_marbles
-        ]
-        safe_marbles = [
-            m
-            for i in controlled
-            for m in self.state.list_player[i].list_marble
-            if m.pos < self.MAIN_PATH_LENGTH and m.is_save
-        ]
-        if not actions and len(safe_marbles) >= 2:
-            actions.extend(self._get_safe_marble_actions_for_jack(safe_marbles, card))
-        return actions
 
     def _get_actions_for_seven_card(self) -> List[Action]:
         assert self.state is not None
@@ -749,6 +749,49 @@ class Dog(Game):
         if action.card_swap is not None:
             self.state.card_active = Card(suit=action.card_swap.suit, rank=action.card_swap.rank)
         self.check_game_status()
+
+    def _handle_card_7(self, player: PlayerState, found_card: Card, action: Action) -> None:
+        assert self.state is not None
+        if self.state.card_active is None:
+            self.state.card_active = found_card
+            self.temp_seven_moves = []
+            self.temp_seven_card = found_card
+            self.temp_seven_state = copy.deepcopy(self.state)
+        pos_from = action.pos_from if action.pos_from is not None else -1
+        pos_to = action.pos_to if action.pos_to is not None else -1
+        steps = self._calc_steps(pos_from, pos_to, self.state.idx_player_active)
+        if steps is None:
+            self.next_turn()
+            self.check_game_status()
+            return
+        self._move_marble(action)
+        assert self.temp_seven_moves is not None
+        self.temp_seven_moves.append(abs(steps))
+        if sum(self.temp_seven_moves) == 7:
+            player.list_card.remove(found_card)
+            assert self.state is not None
+            self.state.list_card_discard.append(found_card)
+            self._reset_card_active()
+            self.next_turn()
+
+    def _handle_card_joker(self, player: PlayerState, found_card: Card, action: Action) -> None:
+        assert self.state is not None
+        pos_from = action.pos_from if action.pos_from is not None else -1
+        pos_to = action.pos_to if action.pos_to is not None else -1
+        steps = self._calc_steps(pos_from, pos_to, self.state.idx_player_active)
+        if steps is None:
+            self.next_turn()
+            self.check_game_status()
+            return
+        self._move_marble(action)
+        if self.state.card_active and self.state.card_active.rank != 'JKR':
+            self.state.card_active = None
+            self.next_turn()
+        else:
+            player.list_card.remove(found_card)
+            self.state.list_card_discard.append(found_card)
+            self._reset_card_active()
+            self.next_turn()
 
     def swap_cards(self, player1_idx: int, player2_idx: int, card1: Card, card2: Card) -> None:
         # Hole die Spielerobjekte
