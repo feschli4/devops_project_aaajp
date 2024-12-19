@@ -665,21 +665,13 @@ class Dog(Game):
         return self._move_through_final_area(fs, diff)
 
     def apply_action(self, action: Optional[Action]) -> None:
+        assert self.state is not None
 
         if self._handle_special_case_test_050():
             return
 
-        # indicates card exchange
-        if (action is not None and
-                action.pos_from is None
-                and action.pos_to is None
-                and action.card is not None
-                and action.card_swap is None):
-            idx_player_partner = (self.state.idx_player_active + 2) % len(self.state.list_player)
-            self.state.list_player[idx_player_partner].list_card.append(action.card)
-            self.state.list_player[self.state.idx_player_active].list_card.remove(action.card)
+        self._handle_card_exchange(action)
 
-        assert self.state is not None
         player = self.state.list_player[self.state.idx_player_active]
         if action is None:
             self._handle_no_action(player)
@@ -738,29 +730,21 @@ class Dog(Game):
             self.next_turn()
         self.check_game_status()
 
-    def _handle_card_exchange(self, player: PlayerState, action: Action) -> None:
-        assert self.state is not None
-        if action.pos_from is None and action.pos_to is None and action.card is not None and action.card_swap is None:
-            found_card: Optional[Card] = None
-            for c in player.list_card:
-                if c.suit == action.card.suit and c.rank == action.card.rank:
-                    found_card = c
-                    break
-            if found_card is not None:
-                player.list_card.remove(found_card)
-                self.exchange_buffer[self.state.idx_player_active] = found_card
-            if self.state.cnt_round == 0 and not self.state.bool_card_exchanged:
-                all_chosen = all(card is not None for card in self.exchange_buffer)
-                if all_chosen:
-                    for p_idx in range(self.state.cnt_player):
-                        chosen_card = self.exchange_buffer[p_idx]
-                        if chosen_card is not None:
-                            partner_idx = (p_idx + 2) % self.state.cnt_player
-                            self.state.list_player[partner_idx].list_card.append(chosen_card)
-                    self.exchange_buffer = [None] * self.state.cnt_player
-                    self.state.bool_card_exchanged = True
-            self._reset_card_active()
-            self.check_game_status()
+    def _handle_card_exchange(self, action: Action | None) -> None:
+        """
+        Handles the card exchange action. Does nothing if the action is not an exchange action.
+        :param action: action to execute
+        :return: None
+        """
+        # indicates card exchange
+        if (action is not None and
+                action.pos_from is None
+                and action.pos_to is None
+                and action.card is not None
+                and action.card_swap is None):
+            idx_player_partner = (self.state.idx_player_active + 2) % len(self.state.list_player)
+            self.state.list_player[idx_player_partner].list_card.append(action.card)
+            self.state.list_player[self.state.idx_player_active].list_card.remove(action.card)
 
     def _handle_joker_swap(self, player: PlayerState, action: Action) -> None:
         assert self.state is not None
