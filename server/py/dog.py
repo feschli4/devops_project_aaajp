@@ -684,9 +684,6 @@ class Dog(Game):
         if action is None:
             self._handle_no_action(player)
             return
-        if action.pos_from == -1 and action.pos_to == -1 and action.card is not None and action.card_swap is None:
-            self._handle_card_exchange(player, action)
-            return
         if action.card and action.card.rank == 'JKR' and action.card_swap:
             self._handle_joker_swap(player, action)
             return
