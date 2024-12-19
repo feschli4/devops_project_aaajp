@@ -669,6 +669,16 @@ class Dog(Game):
         if self._handle_special_case_test_050():
             return
 
+        # indicates card exchange
+        if (action is not None and
+                action.pos_from is None
+                and action.pos_to is None
+                and action.card is not None
+                and action.card_swap is None):
+            idx_player_partner = (self.state.idx_player_active + 2) % len(self.state.list_player)
+            self.state.list_player[idx_player_partner].list_card.append(action.card)
+            self.state.list_player[self.state.idx_player_active].list_card.remove(action.card)
+
         assert self.state is not None
         player = self.state.list_player[self.state.idx_player_active]
         if action is None:
